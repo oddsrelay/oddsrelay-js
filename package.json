@@ -1,7 +1,7 @@
 {
   "name": "oddsrelay",
   "version": "0.1.0",
-  "description": "TypeScript client for the OddsRelay odds API: matched boards, raw odds, events and token-aware calls.",
+  "description": "TypeScript client for OddsRelay: matched odds boards, raw bookmaker and exchange odds, events, with token-aware calls.",
   "keywords": [
     "odds",
     "odds-api",

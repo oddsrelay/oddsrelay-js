@@ -15,6 +15,8 @@ API docs: https://oddsrelay.io/docs
 npm install oddsrelay
 ```
 
+TypeScript projects also need `@types/node` (or the `DOM` lib) for the `Response` and `Headers` types.
+
 ## First call
 
 The status route needs no key, so this works straight after install:
@@ -65,12 +67,12 @@ One method per GET route. Filters go in a params object and are sent as query pa
 | Method | Route | Key |
 |---|---|---|
 | `odds(type, params?, options?)` | `/v2/odds/{type}`: a matched board (`standard`, `2up`, `dutching`, `each-way`, `extra-place`, `bog`) | yes |
-| `raw(params?, options?)` | `/v2/odds/raw`: every bookmaker and exchange price, paged with `cursor` | yes |
+| `raw(params?, options?)` | `/v2/odds/raw`: all bookmaker and exchange prices by event, paged with `cursor` | yes |
 | `event(id, params?, options?)` | `/v2/odds/event/{id}`: every price for one event | yes |
-| `sports(params?)` | `/v2/sports`: sports and competitions, paged | yes |
+| `sports(params?)` | `/v2/sports`: the sport keys you can filter on, paged | yes |
 | `events({ sport, ...params })` | `/v2/events`: events for one sport, paged | yes |
 | `bookmakers(params?)` | `/v2/bookmakers`: the bookmaker and exchange catalogue | yes |
-| `regions()` | `/v2/regions`: the regions your key can read | yes |
+| `regions()` | `/v2/regions`: which regions your key reaches | yes |
 | `coverage(params?)` | `/v2/coverage`: venues and sports per product; a key adds detail | no |
 | `status(params?)` | `/v2/status`: each product's state | no |
 | `health()` | `/v2/health`: board-by-board health | yes |
@@ -83,8 +85,8 @@ Parameters:
 
 - Lists can be arrays or comma strings: `sports: ["soccer", "tennis"]` and `sports: "soccer,tennis"` send the same thing.
 - `true` and `false` are sent as strings. `undefined` and `null` are left out.
-- Anything else you pass is sent as given, and the API answers `400 bad_request` for a parameter it does not know.
-- `format: "bare"` returns the data array alone, and the return type follows.
+- Anything else you pass is sent as given, and the API answers `400 bad_request` for an unknown parameter.
+- `format: "bare"` returns just the rows array, and the return type follows.
 
 Responses are the API's JSON, untouched. Fields added to the API after this version still arrive.
 
@@ -169,12 +171,14 @@ included). A 402 is an `InsufficientTokensError` with `cost`, `remaining` and `r
 ## Rate limits
 
 On a 429 the client waits for `Retry-After` and tries again, up to three tries in all. If the last try is still
-429, it throws an `OddsRelayError` with `status` 429. `res.rateLimit` shows where you stand in the current window.
+429, it throws an `OddsRelayError` with `status` 429. A `Retry-After` longer than a minute is not waited out: the
+client throws at once and leaves the decision to you. `res.rateLimit` shows where you stand in the current window.
 
 ## Your key
 
 The key is sent only in the `Authorization: Bearer` header. It never goes in a URL, the client logs nothing, and
-no error message or inspected client shows it. Keep it in the environment rather than in code, and leave it out
+no error message or inspected client shows it. A key with a line break or another character a header cannot
+carry is refused when the client is created, without echoing it. Keep it in the environment rather than in code, and leave it out
 of anything you commit.
 
 ## API version

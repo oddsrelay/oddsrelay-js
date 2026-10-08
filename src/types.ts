@@ -4,7 +4,7 @@
 /** A value the client can put in a query string. Arrays are sent as comma lists. */
 export type QueryValue = string | number | boolean | readonly string[];
 
-/** Any extra parameter passes through as-is; the API refuses ones it does not know. */
+/** Any extra parameter passes through as-is; the API refuses unknown ones. */
 export interface QueryParams {
   [name: string]: QueryValue | undefined | null;
 }
@@ -62,7 +62,7 @@ export interface RawParams extends QueryParams {
   includeLinks?: Flag;
   includeLiquidity?: Flag;
   cursor?: string;
-  /** Events per page, 1 to 250. */
+  /** Page size, 1 to 250. */
   limit?: number;
 }
 
@@ -332,7 +332,7 @@ export interface Tokens {
   used?: number;
   remaining?: number | "unlimited";
   limit?: number | "unlimited";
-  /** When the pool resets, ISO 8601. */
+  /** When the token balance next renews, as an ISO 8601 time. */
   reset?: string;
 }
 
@@ -340,7 +340,7 @@ export interface Tokens {
 export interface RateLimit {
   limit?: number;
   remaining?: number;
-  /** Seconds until the window ends. */
+  /** How many seconds are left in the current window. */
   reset?: number;
 }
 
@@ -367,7 +367,7 @@ export interface NotModified extends ResponseInfo {
 
 export type Result<T> = Fresh<T> | NotModified;
 
-/** `format: "bare"` returns the data array alone. A format only known at runtime gives either shape. */
+/** `format: "bare"` returns just the rows array. A format only known at runtime gives either shape. */
 export type Shaped<P, E extends { data: unknown }> = P extends { format: "bare" }
   ? E["data"]
   : "format" extends keyof P

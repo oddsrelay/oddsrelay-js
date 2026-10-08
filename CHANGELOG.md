@@ -8,9 +8,11 @@ First version, written against the OddsRelay API's OpenAPI document `2026-07-08`
   `status`, `health`, `usage`, `pricing`, `openapi`, `healthz`.
 - The key from `ODDSRELAY_KEY` or the `apiKey` option, sent only as a Bearer header.
 - `Accept-Encoding: gzip` on every request.
-- ETags kept per URL and sent back as `If-None-Match`; a 304 resolves with `notModified: true`.
+- ETags kept per URL, once a reply's body has arrived whole, and sent back as `If-None-Match`; a 304 resolves
+  with `notModified: true`.
 - `quote: true` passes through, and the `maxTokens` option quotes before the call.
-- A 429 waits for `Retry-After`, up to three tries in all.
+- A 429 waits for `Retry-After`, up to three tries in all; a `Retry-After` longer than a minute throws at once.
+- A key that an HTTP header cannot carry is refused when the client is created, and never echoed.
 - `OddsRelayError` with the API's `code` and `requestId`; `InsufficientTokensError` for a 402.
 - `tokens` and `rateLimit` from the response headers on every result and error.
 - `CONTRACT_VERSION` exported.

@@ -31,7 +31,7 @@ function stub(...replies) {
 const json = { "content-type": "application/json" };
 
 test("exports the contract version", () => {
-  assert.match(CONTRACT_VERSION, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(CONTRACT_VERSION, "2026-07-08");
 });
 
 test("sends the key as a Bearer header from ODDSRELAY_KEY, never in the URL, and always asks for gzip", async () => {
@@ -59,6 +59,21 @@ test("the apiKey option wins over the environment", async () => {
   } finally {
     delete process.env.ODDSRELAY_KEY;
   }
+});
+
+test("a key a header cannot carry is refused up front, without showing it; spaces round it are trimmed", async () => {
+  for (const apiKey of ["abc\ndef-secret", "abc\u0000def-secret", "abc\u2019def-secret"]) {
+    assert.throws(() => new OddsRelay({ apiKey }), (e) => /cannot carry/.test(e.message) && !e.message.includes("def-secret"));
+  }
+  process.env.ODDSRELAY_KEY = "abc\ndef-secret";
+  try {
+    assert.throws(() => new OddsRelay(), /cannot carry/);
+  } finally {
+    delete process.env.ODDSRELAY_KEY;
+  }
+  const { fetch, calls } = stub([200, "{}", json]);
+  await new OddsRelay({ apiKey: ` ${KEY}\n`, fetch }).usage();
+  assert.equal(calls[0].headers.Authorization, `Bearer ${KEY}`);
 });
 
 test("a keyed route without a key fails before any request", async () => {
@@ -94,7 +109,7 @@ test("every route has a method on the right path", async () => {
   const routes = [
     ["odds", ["2up"], "/v2/odds/2up"],
     ["raw", [], "/v2/odds/raw"],
-    ["event", ["or_evt_1"], "/v2/odds/event/or_evt_1"],
+    ["event", ["or_evt/1"], "/v2/odds/event/or_evt%2F1"],
     ["sports", [], "/v2/sports"],
     ["events", [{ sport: "soccer" }], "/v2/events?sport=soccer"],
     ["bookmakers", [], "/v2/bookmakers"],
@@ -150,6 +165,29 @@ test("keeps the ETag per URL, sends If-None-Match, and returns a 304 as not modi
   assert.equal(calls[2].headers["If-None-Match"], undefined, "another URL has its own ETag");
 });
 
+test("an ETag is kept only once the body has arrived whole", async () => {
+  const { fetch, calls } = stub([200, '{"data":[', { ...json, etag: '"cut"' }], [200, "{}", json]);
+  const client = new OddsRelay({ apiKey: KEY, fetch });
+  await assert.rejects(client.sports(), SyntaxError);
+  await client.sports();
+  assert.equal(calls[1].headers["If-None-Match"], undefined);
+});
+
+test("ETags are kept for the most recent URLs only", async () => {
+  const n = 501; // one more than the client keeps
+  const { fetch, calls } = stub(
+    ...Array.from({ length: n }, (_, i) => [200, "{}", { ...json, etag: `"e${i}"` }]),
+    [200, "{}", json],
+    [200, "{}", json],
+  );
+  const client = new OddsRelay({ apiKey: KEY, fetch });
+  for (let i = 0; i < n; i++) await client.sports({ cursor: String(i) });
+  await client.sports({ cursor: "0" });
+  await client.sports({ cursor: "1" });
+  assert.equal(calls[n].headers["If-None-Match"], undefined, "the oldest was dropped");
+  assert.equal(calls[n + 1].headers["If-None-Match"], '"e1"');
+});
+
 test("a 429 waits Retry-After and tries again", async () => {
   const waits = [];
   const { fetch, calls } = stub([429, null, { "retry-after": "2" }], [200, fixture("v2-status.status.json"), json]);
@@ -170,6 +208,15 @@ test("a 429 gives up after three tries with a typed error", async () => {
   assert.deepEqual(waits, [1000, 1000]);
 });
 
+test("a Retry-After longer than a minute is thrown at once, not slept through", async () => {
+  const waits = [];
+  const { fetch, calls } = stub([429, null, { "retry-after": "86400" }]);
+  const err = await new OddsRelay({ fetch, sleep: async (ms) => void waits.push(ms) }).status().catch((e) => e);
+  assert.equal(err.status, 429);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(waits, []);
+});
+
 test("a 402 is an InsufficientTokensError carrying cost, remaining and the reset time", async () => {
   const { fetch } = stub([402, fixture("error-402.insufficient_tokens.json"), { ...json, "x-tokens-cost": "0" }]);
   const err = await new OddsRelay({ apiKey: KEY, fetch }).odds("standard").catch((e) => e);
@@ -185,7 +232,7 @@ test("a 402 is an InsufficientTokensError carrying cost, remaining and the reset
 
 test("other errors are typed by error.code, keep request_id, and accept codes and fields this client does not know", async () => {
   const novel = JSON.stringify({ error: { code: "brand_new_code", message: "Something new.", request_id: "or_req_9", hint: 1 } });
-  const { fetch } = stub([401, fixture("error-401.invalid_api_key.json"), json], [403, novel, json], [502, "Bad Gateway"]);
+  const { fetch } = stub([401, fixture("error-401.invalid_api_key.json"), json], [403, novel, json], [502, "Bad Gateway", { "x-oddsrelay-request-id": "or_req_hdr" }]);
   const client = new OddsRelay({ apiKey: KEY, fetch });
 
   const e401 = await client.usage().catch((e) => e);
@@ -201,6 +248,7 @@ test("other errors are typed by error.code, keep request_id, and accept codes an
   const e502 = await client.usage().catch((e) => e);
   assert.equal(e502.code, "http_502");
   assert.equal(e502.body, undefined);
+  assert.equal(e502.requestId, "or_req_hdr", "falls back to the header when there is no body");
 });
 
 test("the key never shows in an error, its stack or an inspected client", async () => {
@@ -214,10 +262,10 @@ test("the key never shows in an error, its stack or an inspected client", async 
 
 test("maxTokens quotes first and makes the call only when the quote fits", async () => {
   const quote = (cost) => [200, JSON.stringify({ cost, remaining: 900, rate_card: "2026-09" }), json];
-  const { fetch, calls } = stub(quote(40), [200, '{"meta":{},"data":[],"later_field":true}', json], quote(400));
+  const { fetch, calls } = stub(quote(100), [200, '{"meta":{},"data":[],"later_field":true}', json], quote(400));
   const client = new OddsRelay({ apiKey: KEY, fetch });
 
-  const res = await client.odds("standard", { sports: "soccer" }, { maxTokens: 100 });
+  const res = await client.odds("standard", { sports: "soccer" }, { maxTokens: 100 }); // a quote equal to the cap fits
   assert.equal(calls[0].url, "https://api.oddsrelay.io/v2/odds/standard?sports=soccer&quote=true");
   assert.equal(calls[1].url, "https://api.oddsrelay.io/v2/odds/standard?sports=soccer");
   assert.equal(res.data.later_field, true, "unknown fields are kept");

@@ -39,6 +39,8 @@ export const CONTRACT_VERSION = "2026-07-08";
 const BASE_URL = "https://api.oddsrelay.io";
 const MAX_TRIES = 3;
 const MAX_ETAGS = 500;
+/** A longer Retry-After is thrown to the caller rather than slept through: the account's windows are a minute at most. */
+const MAX_WAIT_S = 60;
 
 export type FetchLike = (url: string, init: { headers: Record<string, string> }) => Promise<Response>;
 
@@ -92,7 +94,7 @@ export class InsufficientTokensError extends OddsRelayError {
   override name = "InsufficientTokensError";
   readonly cost: number | undefined;
   readonly remaining: number | undefined;
-  /** When the pool resets, ISO 8601. */
+  /** When the token balance next renews, as an ISO 8601 time. */
   readonly resetsAt: string | undefined;
 
   constructor(info: ResponseInfo, body?: Record<string, unknown>) {
@@ -125,7 +127,12 @@ export class OddsRelay {
 
   constructor(options: ClientOptions = {}) {
     const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-    this.#key = options.apiKey ?? env?.ODDSRELAY_KEY;
+    const key = (options.apiKey ?? env?.ODDSRELAY_KEY)?.trim();
+    // Checked here because fetch's own error for a bad header value prints the whole value, key included.
+    if (key && !/^[\x21-\x7e]+$/.test(key)) {
+      throw new Error("the API key has a character an HTTP header cannot carry, such as a line break: check ODDSRELAY_KEY or apiKey");
+    }
+    this.#key = key || undefined;
     this.#fetch = options.fetch ?? ((url, init) => fetch(url, init));
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
@@ -135,7 +142,7 @@ export class OddsRelay {
     return this.#data<Quoted<P, Shaped<P, MatchedBoard>>>(`/v2/odds/${encodeURIComponent(type)}`, params, options);
   }
 
-  /** Every price per bookmaker and exchange, one page at a time (`cursor`). */
+  /** All bookmaker and exchange prices by event, paged with `cursor`. */
   raw<P extends RawParams = {}>(params?: P, options?: CallOptions) {
     return this.#data<Quoted<P, Shaped<P, RawBoard>>>("/v2/odds/raw", params, options);
   }
@@ -145,7 +152,7 @@ export class OddsRelay {
     return this.#data<Quoted<P, RawEvent>>(`/v2/odds/event/${encodeURIComponent(id)}`, params, options);
   }
 
-  /** Sports and competitions, paged. */
+  /** The sport keys you can filter on, paged. */
   sports<P extends SportsParams = {}>(params?: P) {
     return this.#get<Shaped<P, Page<Sport>>>("/v2/sports", params, "required");
   }
@@ -160,7 +167,7 @@ export class OddsRelay {
     return this.#get<Shaped<P, Catalogue>>("/v2/bookmakers", params, "required");
   }
 
-  /** The regions this key can read. */
+  /** Which regions this key reaches. */
   regions() {
     return this.#get<Regions>("/v2/regions", undefined, "required");
   }
@@ -219,16 +226,18 @@ export class OddsRelay {
 
     for (let attempt = 1; ; attempt++) {
       const res = await this.#fetch(url, { headers });
-      if (res.status === 429 && attempt < MAX_TRIES) {
+      const wait = count(res.headers, "retry-after") ?? 1;
+      if (res.status === 429 && attempt < MAX_TRIES && wait <= MAX_WAIT_S) {
         await res.body?.cancel();
-        await this.#sleep((count(res.headers, "retry-after") ?? 1) * 1000);
+        await this.#sleep(wait * 1000);
         continue;
       }
       const info = describe(res);
       if (res.status === 304) return { ...info, notModified: true };
       if (!res.ok) throw await toError(res, info);
-      if (info.etag) this.#remember(url, info.etag);
       const data = (text ? await res.text() : await res.json()) as T;
+      // Stored only once the body has arrived whole, so a cut-off reply is fetched in full next time.
+      if (info.etag) this.#remember(url, info.etag);
       return { ...info, notModified: false, data };
     }
   }
