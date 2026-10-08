@@ -1,0 +1,50 @@
+{
+  "name": "oddsrelay",
+  "version": "0.1.0",
+  "description": "TypeScript client for the OddsRelay odds API: matched boards, raw odds, events and token-aware calls.",
+  "keywords": [
+    "odds",
+    "odds-api",
+    "sports-odds",
+    "odds-data",
+    "bookmakers",
+    "exchange",
+    "oddsmatcher",
+    "oddsrelay"
+  ],
+  "homepage": "https://oddsrelay.io",
+  "bugs": {
+    "url": "https://github.com/oddsrelay/oddsrelay-js/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oddsrelay/oddsrelay-js.git"
+  },
+  "license": "MIT",
+  "author": "OddsRelay <hello@oddsrelay.io> (https://oddsrelay.io)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && tsc -p test && node --test test/client.test.mjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}
