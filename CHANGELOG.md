@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-09)
 
 First version, written against the OddsRelay API's OpenAPI document `2026-07-08`.
 
