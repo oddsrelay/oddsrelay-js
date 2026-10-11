@@ -17,6 +17,11 @@ npm install oddsrelay
 
 TypeScript projects also need `@types/node` (or the `DOM` lib) for the `Response` and `Headers` types.
 
+## Get a key
+
+Sign up at [app.oddsrelay.io/signup](https://app.oddsrelay.io/signup) and copy your key from the dashboard.
+Free gives you 50,000 tokens for 14 days from sign-up, with no card, then no tokens until you choose a plan, on the same key. [Plans and token prices](https://oddsrelay.io/pricing).
+
 ## First call
 
 The status route needs no key, so this works straight after install:
@@ -32,7 +37,7 @@ console.log(status.data);
 Save it as `first.mjs` and run `node first.mjs`. (The examples use top-level `await`, so they need an ES module:
 a `.mjs` file, or `"type": "module"` in your package.json.)
 
-Data routes need a key. Create one from your account at https://oddsrelay.io, then put it in the environment:
+Data routes need a key (Get a key, above). Put it in the environment:
 
 ```sh
 export ODDSRELAY_KEY=your_key_here
@@ -195,10 +200,14 @@ if (!spec.notModified && spec.data.info.version !== CONTRACT_VERSION) {
 }
 ```
 
-## Links
+## More from OddsRelay
 
-- Docs: https://oddsrelay.io/docs
-- Website: https://oddsrelay.io
+- [oddsrelay-python](https://github.com/oddsrelay/oddsrelay-python): the Python client, `pip install oddsrelay`
+- [oddsrelay-r](https://github.com/oddsrelay/oddsrelay-r): the R client
+- [oddsrelay-mcp](https://github.com/oddsrelay/oddsrelay-mcp): an MCP server that gives Claude, Cursor and other AI assistants read access, with a token cap
+- [oddsrelay-sheets](https://github.com/oddsrelay/oddsrelay-sheets): formulas and a template spreadsheet for Google Sheets
+- [examples](https://github.com/oddsrelay/examples): short programs to copy, one folder each
+- [Libraries and tools](https://oddsrelay.io/docs/libraries), the [docs](https://oddsrelay.io/docs), the [API reference](https://oddsrelay.io/docs/reference) and the [OpenAPI file](https://api.oddsrelay.io/v2/openapi.json)
 - Contact: hello@oddsrelay.io
 
 ## License
