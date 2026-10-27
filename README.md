@@ -68,7 +68,7 @@ You can also pass the key yourself: `new OddsRelay({ apiKey })`.
 
 ## Methods
 
-One method per GET route. Filters go in a params object and are sent as query parameters.
+One method per live-feed data and lookup route. Filters go in a params object and are sent as query parameters.
 
 | Method | Route | Key |
 |---|---|---|
@@ -86,6 +86,8 @@ One method per GET route. Filters go in a params object and are sent as query pa
 | `pricing()` | `/v2/pricing`: the token rate card | yes |
 | `openapi()` | `/v2/openapi.json`: the API's OpenAPI document | no |
 | `healthz()` | `/healthz`: plain-text liveness check | no |
+
+The historical odds routes (`/v2/historical/*`) have no method yet.
 
 Parameters:
 

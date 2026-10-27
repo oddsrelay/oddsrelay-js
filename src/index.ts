@@ -118,7 +118,7 @@ export class OverBudgetError extends Error {
   }
 }
 
-/** The OddsRelay API client. One method per GET route; filters go in the params object. */
+/** The OddsRelay API client. One method per live-feed data and lookup route; filters go in the params object. */
 export class OddsRelay {
   readonly #key: string | undefined;
   readonly #fetch: FetchLike;
