@@ -1,11 +1,22 @@
 import type {
   BookmakersParams,
   Catalogue,
+  ClosingParams,
   Coverage,
   Event,
+  EventChanges,
+  EventChangesParams,
   EventParams,
+  EventStateParams,
+  EventStates,
   EventsParams,
+  FileParams,
   Health,
+  HistoryEventParams,
+  HistoryFile,
+  HistoryFilesParams,
+  HistoryPage,
+  HistoryRawParams,
   MatchedBoard,
   OddsParams,
   OddsType,
@@ -62,6 +73,7 @@ export interface CallOptions {
 }
 
 type Auth = "required" | "optional" | "none";
+type Body = "json" | "text" | "bytes";
 
 /** Any non-2xx, non-304 reply. Branch on `code`; quote `requestId` when asking for help. */
 export class OddsRelayError extends Error {
@@ -118,7 +130,7 @@ export class OverBudgetError extends Error {
   }
 }
 
-/** The OddsRelay API client. One method per live-feed data and lookup route; filters go in the params object. */
+/** The OddsRelay API client. One method per data, lookup and historical route; filters go in the params object. */
 export class OddsRelay {
   readonly #key: string | undefined;
   readonly #fetch: FetchLike;
@@ -142,7 +154,7 @@ export class OddsRelay {
     return this.#data<Quoted<P, Shaped<P, MatchedBoard>>>(`/v2/odds/${encodeURIComponent(type)}`, params, options);
   }
 
-  /** All bookmaker and exchange prices by event, paged with `cursor`. */
+  /** All bookmaker and exchange prices by event, paged with `cursor`. `region` is one code or a list of international codes. */
   raw<P extends RawParams = {}>(params?: P, options?: CallOptions) {
     return this.#data<Quoted<P, Shaped<P, RawBoard>>>("/v2/odds/raw", params, options);
   }
@@ -160,6 +172,16 @@ export class OddsRelay {
   /** Events for one sport, paged. */
   events<P extends EventsParams>(params: P) {
     return this.#get<Shaped<P, Page<Event>>>("/v2/events", params, "required");
+  }
+
+  /** Each event's state in one region: scheduled, started, gone or merged. Spends no tokens. */
+  eventsState(params?: EventStateParams) {
+    return this.#get<EventStates>("/v2/events/state", params, "required");
+  }
+
+  /** The state changes after `since`, in order. Spends no tokens. A 410 `since_expired` means: snapshot again. */
+  eventsChanges(params: EventChangesParams) {
+    return this.#get<EventChanges>("/v2/events/changes", params, "required");
   }
 
   /** The bookmaker and exchange catalogue. */
@@ -204,19 +226,45 @@ export class OddsRelay {
 
   /** The front door's plain-text liveness check. No key needed. */
   healthz() {
-    return this.#get<string>("/healthz", undefined, "none", true);
+    return this.#get<string>("/healthz", undefined, "none", "text");
   }
 
-  async #data<T>(path: string, params: QueryParams | undefined, options: CallOptions | undefined): Promise<Result<T>> {
+  /** The raw board as it stood at `date`. */
+  historyRaw<P extends HistoryRawParams>(params: P, options?: CallOptions) {
+    return this.#data<Quoted<P, Shaped<P, HistoryPage<RawEvent>>>>("/v2/historical/odds/raw", params, options);
+  }
+
+  /** One event's price changes from `from`, over at most 24 hours. */
+  historyEvent<P extends HistoryEventParams>(id: string, params: P, options?: CallOptions) {
+    return this.#data<Quoted<P, HistoryPage>>(`/v2/historical/events/${encodeURIComponent(id)}/odds`, params, options);
+  }
+
+  /** Opening and closing prices of the events that started on the UTC day `date`. */
+  closing<P extends ClosingParams>(params: P, options?: CallOptions) {
+    return this.#data<Quoted<P, HistoryPage>>("/v2/historical/closing", params, options);
+  }
+
+  /** The bulk day files, with each one's size and cost. */
+  historyFiles(params?: HistoryFilesParams) {
+    return this.#get<HistoryPage<HistoryFile>>("/v2/historical/files", params, "required");
+  }
+
+  /** One bulk file as bytes (a gzip CSV, as sent). Charged in full when the download starts. */
+  downloadFile<P extends FileParams = {}>(tier: string, sport: string, file: string, params?: P, options?: CallOptions) {
+    const path = `/v2/historical/files/${[tier, sport, file].map(encodeURIComponent).join("/")}`;
+    return this.#data<Quoted<P, Uint8Array>>(path, params, options, params?.quote === true ? "json" : "bytes");
+  }
+
+  async #data<T>(path: string, params: QueryParams | undefined, options: CallOptions | undefined, body: Body = "json"): Promise<Result<T>> {
     const max = options?.maxTokens;
     if (max !== undefined && params?.quote !== true) {
       const priced = await this.#get<Quote>(path, { ...params, quote: true }, "required");
       if (!priced.notModified && priced.data.cost > max) throw new OverBudgetError(priced.data, max);
     }
-    return this.#get<T>(path, params, "required");
+    return this.#get<T>(path, params, "required", body);
   }
 
-  async #get<T>(path: string, params: QueryParams | undefined, auth: Auth, text = false): Promise<Result<T>> {
+  async #get<T>(path: string, params: QueryParams | undefined, auth: Auth, body: Body = "json"): Promise<Result<T>> {
     const url = BASE_URL + path + query(params);
     const headers: Record<string, string> = { "Accept-Encoding": "gzip" };
     if (auth !== "none" && this.#key) headers.Authorization = `Bearer ${this.#key}`;
@@ -235,7 +283,7 @@ export class OddsRelay {
       const info = describe(res);
       if (res.status === 304) return { ...info, notModified: true };
       if (!res.ok) throw await toError(res, info);
-      const data = (text ? await res.text() : await res.json()) as T;
+      const data = (body === "text" ? await res.text() : body === "bytes" ? new Uint8Array(await res.arrayBuffer()) : await res.json()) as T;
       // Stored only once the body has arrived whole, so a cut-off reply is fetched in full next time.
       if (info.etag) this.#remember(url, info.etag);
       return { ...info, notModified: false, data };

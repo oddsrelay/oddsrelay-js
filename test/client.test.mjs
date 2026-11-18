@@ -120,6 +120,13 @@ test("every route has a method on the right path", async () => {
     ["usage", [], "/v2/usage"],
     ["pricing", [], "/v2/pricing"],
     ["openapi", [], "/v2/openapi.json"],
+    ["eventsState", [{ region: "us" }], "/v2/events/state?region=us"],
+    ["eventsChanges", [{ since: "3fa9c1d2.1" }], "/v2/events/changes?since=3fa9c1d2.1"],
+    ["historyRaw", [{ date: "2026-11-16T12:00:00Z", sports: ["soccer"] }], "/v2/historical/odds/raw?date=2026-11-16T12%3A00%3A00Z&sports=soccer"],
+    ["historyEvent", ["or_evt/1", { from: "2026-11-16T12:00:00Z" }], "/v2/historical/events/or_evt%2F1/odds?from=2026-11-16T12%3A00%3A00Z"],
+    ["closing", [{ date: "2026-11-16", sports: "soccer" }], "/v2/historical/closing?date=2026-11-16&sports=soccer"],
+    ["historyFiles", [], "/v2/historical/files"],
+    ["downloadFile", ["closing", "soccer", "2026-11-16.csv.gz", { quote: true }], "/v2/historical/files/closing/soccer/2026-11-16.csv.gz?quote=true"],
   ];
   const { fetch, calls } = stub(...routes.map(() => [200, "{}", json]), [200, "ok\n", { "content-type": "text/plain" }]);
   const client = new OddsRelay({ apiKey: KEY, fetch });
@@ -281,4 +288,75 @@ test("quote: true returns the quote itself", async () => {
   const res = await new OddsRelay({ apiKey: KEY, fetch }).raw({ quote: true });
   assert.equal(calls[0].url, "https://api.oddsrelay.io/v2/odds/raw?quote=true");
   assert.equal(res.data.rate_card, "2026-09");
+});
+
+test("raw takes one region code or a list of international codes", async () => {
+  const { fetch, calls } = stub([200, "{}", json], [200, "{}", json], [200, "{}", json]);
+  const client = new OddsRelay({ apiKey: KEY, fetch });
+  await client.raw({ region: "us", inPlay: "only" });
+  await client.raw({ region: "us,global" });
+  await client.raw({ region: ["us", "global"] });
+  assert.deepEqual(
+    calls.map((c) => c.url.split("?")[1]),
+    ["region=us&inPlay=only", "region=us,global", "region=us,global"],
+  );
+});
+
+test("the region and history refusals keep their codes and fields", async () => {
+  const { fetch } = stub(
+    [400, fixture("error-400.region_required.json"), json],
+    [403, fixture("error-403.product_not_in_region.json"), json],
+    [400, fixture("error-400.date_out_of_range.json"), json],
+    [410, fixture("error-410.since_expired.json"), json],
+  );
+  const client = new OddsRelay({ apiKey: KEY, fetch });
+  assert.equal((await client.raw().catch((e) => e)).code, "region_required");
+  const e403 = await client.odds("standard", { region: "za" }).catch((e) => e);
+  assert.deepEqual([e403.status, e403.code], [403, "product_not_in_region"]);
+  const early = await client.closing({ date: "2026-11-01", sports: "basketball", region: "us" }).catch((e) => e);
+  assert.equal(early.code, "date_out_of_range");
+  assert.equal(early.body.earliest, "2026-10-15T00:00:00.000Z");
+  const gone = await client.eventsChanges({ since: "00000000.1" }).catch((e) => e);
+  assert.ok(gone instanceof OddsRelayError);
+  assert.deepEqual([gone.status, gone.code, gone.body.oldest_since], [410, "since_expired", "3fa9c1d2.1840221"]);
+});
+
+test("event states: a snapshot, then the changes from its since", async () => {
+  const { fetch, calls } = stub([200, fixture("v2-events-state.page.json"), json], [200, fixture("v2-events-changes.page.json"), json]);
+  const client = new OddsRelay({ apiKey: KEY, fetch });
+  const snapshot = await client.eventsState({ region: "us", sports: "basketball" });
+  assert.equal(snapshot.data.data[0].state, "scheduled");
+  const log = await client.eventsChanges({ since: snapshot.data.meta.since, region: "us", sports: "basketball" });
+  assert.equal(calls[1].url, "https://api.oddsrelay.io/v2/events/changes?since=3fa9c1d2.1840221&region=us&sports=basketball");
+  assert.equal(log.data.data[0].event.state, "started");
+  assert.equal(log.data.meta.more, false);
+});
+
+test("history routes read their pages, and maxTokens quotes them first", async () => {
+  const { fetch, calls } = stub(
+    [200, fixture("v2-odds-type.quote.json"), json],
+    [200, fixture("v2-historical-odds-raw.page.json"), json],
+    [200, fixture("v2-historical-events-id-odds.rows.json"), json],
+    [200, fixture("v2-historical-closing.page.json"), json],
+    [200, fixture("v2-historical-files.list.json"), json],
+  );
+  const client = new OddsRelay({ apiKey: KEY, fetch });
+  const cost = JSON.parse(fixture("v2-odds-type.quote.json")).cost;
+  const board = await client.historyRaw({ date: "2026-11-16T12:00:00Z", sports: "soccer", region: "us" }, { maxTokens: cost });
+  assert.ok(calls[0].url.endsWith("&region=us&quote=true"));
+  assert.equal(board.data.meta.historical, true);
+  const rows = await client.historyEvent("or_evt_e7d98bab53e3", { from: "2026-11-16T12:00:00Z", bookmakersOnly: true });
+  assert.ok(calls[2].url.endsWith("/odds?from=2026-11-16T12%3A00%3A00Z&bookmakersOnly=true"));
+  assert.ok("gaps" in rows.data.meta);
+  assert.equal((await client.closing({ date: "2026-11-08", sports: "soccer" })).data.meta.feed_type, "historical_closing");
+  assert.equal((await client.historyFiles({ region: "uk" })).data.data[0].tier, "closing");
+});
+
+test("a downloaded file arrives as bytes, exactly as sent", async () => {
+  const sent = new Uint8Array([0x1f, 0x8b, 8, 0, 1, 2, 3]);
+  const { fetch, calls } = stub([200, sent, { "content-type": "application/gzip" }]);
+  const res = await new OddsRelay({ apiKey: KEY, fetch }).downloadFile("closing", "soccer", "2026-10-16.csv.gz", { region: "uk" });
+  assert.equal(calls[0].url, "https://api.oddsrelay.io/v2/historical/files/closing/soccer/2026-10-16.csv.gz?region=uk");
+  assert.ok(res.data instanceof Uint8Array);
+  assert.deepEqual([...res.data], [...sent]);
 });

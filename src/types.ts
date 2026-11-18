@@ -14,6 +14,7 @@ type Flag = boolean | "true" | "false";
 type Format = "envelope" | "bare";
 type OddsFormat = "decimal" | "american";
 type DateFormat = "iso" | "unix";
+type InPlay = "exclude" | "include" | "only";
 
 /** The matched boards. The API may add more. */
 export type OddsType =
@@ -40,10 +41,13 @@ export interface OddsParams extends QueryParams {
   markets?: List;
   commenceTimeFrom?: string;
   commenceTimeTo?: string;
+  /** `standard` and `dutching` only: `exclude` (the default) or `only`. */
+  inPlay?: InPlay;
 }
 
 export interface RawParams extends QueryParams {
-  region?: string;
+  /** One region code, or several international codes read as one board: `"us,global"` or `["us", "global"]`. `uk` is asked alone. */
+  region?: List;
   format?: Format;
   oddsFormat?: OddsFormat;
   dateFormat?: DateFormat;
@@ -59,6 +63,7 @@ export interface RawParams extends QueryParams {
   commenceTimeTo?: string;
   updatedSince?: string;
   exchangesOnly?: Flag;
+  inPlay?: InPlay;
   includeLinks?: Flag;
   includeLiquidity?: Flag;
   cursor?: string;
@@ -72,6 +77,7 @@ export interface EventParams extends QueryParams {
   dateFormat?: DateFormat;
   includeLinks?: Flag;
   includeLiquidity?: Flag;
+  inPlay?: InPlay;
   quote?: boolean;
 }
 
@@ -91,6 +97,78 @@ export interface EventsParams extends QueryParams {
   eventIds?: List;
   commenceTimeFrom?: string;
   commenceTimeTo?: string;
+}
+
+export interface EventStateParams extends QueryParams {
+  region?: string;
+  sports?: List;
+  leagues?: List;
+  eventIds?: List;
+  /** `scheduled` (the default), `started`, `gone`, `merged`. */
+  states?: List;
+  commenceTimeFrom?: string;
+  commenceTimeTo?: string;
+  dateFormat?: DateFormat;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface EventChangesParams extends QueryParams {
+  /** A snapshot's first `meta.since`, then each reply's `meta.next_since`. */
+  since: string;
+  region?: string;
+  sports?: List;
+  leagues?: List;
+  eventIds?: List;
+  commenceTimeFrom?: string;
+  commenceTimeTo?: string;
+  dateFormat?: DateFormat;
+  limit?: number;
+}
+
+/** Filters the historical routes share. `region` is `uk` (the default) or one other code. */
+export interface HistoryParams extends QueryParams {
+  region?: string;
+  oddsFormat?: OddsFormat;
+  bookmakers?: List;
+  exchanges?: List;
+  markets?: List;
+  exchangesOnly?: Flag;
+  bookmakersOnly?: Flag;
+  limit?: number;
+  cursor?: string;
+  quote?: boolean;
+}
+
+export interface HistoryRawParams extends HistoryParams {
+  /** The moment to read the board at, ISO 8601. */
+  date: string;
+  sports: List;
+  format?: Format;
+  dateFormat?: DateFormat;
+  eventIds?: List;
+  includeLiquidity?: Flag;
+}
+
+export interface HistoryEventParams extends HistoryParams {
+  /** The window's start, ISO 8601. The window is at most 24 hours. */
+  from: string;
+  to?: string;
+}
+
+export interface ClosingParams extends HistoryParams {
+  /** A UTC day, `YYYY-MM-DD`. */
+  date: string;
+  sports: List;
+}
+
+export interface HistoryFilesParams extends QueryParams {
+  region?: string;
+}
+
+export interface FileParams extends QueryParams {
+  region?: string;
+  quote?: boolean;
 }
 
 export interface BookmakersParams extends QueryParams {
@@ -194,8 +272,56 @@ export interface RawEvent {
 }
 
 export interface RawBoard {
-  meta: PageMeta & { total: number; board_version: number | null };
+  /** `regions` is sent only when the call named a list of regions. */
+  meta: PageMeta & { total: number; board_version: number | null; regions?: string[] };
   data: RawEvent[];
+}
+
+/** One event's state in a region. */
+export interface EventState {
+  id: string;
+  state: "scheduled" | "started" | "gone" | "merged" | (string & {});
+  state_since: Time;
+  merged_into: string | null;
+  sport_key: string | null;
+  home_team: string | null;
+  away_team: string | null;
+  commence_time: Time | null;
+  previous_ids: string[];
+  regions: string[];
+  seq: number;
+  [field: string]: unknown;
+}
+
+export interface EventStates {
+  /** Keep the first page's `since` and follow `eventsChanges` from it. */
+  meta: PageMeta & { since: string; stale: boolean; unknown_ids: string[] };
+  data: EventState[];
+}
+
+export interface EventChanges {
+  /** Call again with `next_since`; at once while `more` is true. */
+  meta: PageMeta & { next_since: string; more: boolean; stale: boolean; oldest_since: string };
+  /** Replace your row for `event.id` with `event` whenever its `seq` is above yours. */
+  data: { seq: number; at: Time; change: string; board_version: number; event: EventState; [field: string]: unknown }[];
+}
+
+/** A historical page: the route's rows under `data`, with `meta.historical` true. */
+export interface HistoryPage<T = Record<string, unknown>> {
+  meta: PageMeta & { historical: true; [field: string]: unknown };
+  data: T[];
+}
+
+/** One bulk file in the listing. */
+export interface HistoryFile {
+  name: string;
+  tier: string;
+  sport: string;
+  day: string;
+  size: number;
+  url: string;
+  cost: number;
+  bookmakers_only: boolean;
 }
 
 export interface Sport {

@@ -1,7 +1,8 @@
 # oddsrelay
 
-The OddsRelay API client for JavaScript and TypeScript: matched odds boards, raw bookmaker and exchange odds,
-sports, events and coverage, with the token meter on every reply.
+The OddsRelay API client for JavaScript and TypeScript: raw bookmaker odds for the UK & Ireland and more regions,
+UK and Irish bookmakers matched to exchange lay prices, in-play prices, historical odds, sports, events and
+coverage, with the token meter on every reply.
 
 - No runtime dependencies. It uses the `fetch` built into Node 18 and later.
 - ESM with TypeScript types. Return types follow your parameters (`format`, `quote`).
@@ -67,9 +68,25 @@ console.log("tokens spent:", res.tokens.cost, "left:", res.tokens.remaining);
 
 You can also pass the key yourself: `new OddsRelay({ apiKey })`.
 
+## Regions
+
+Raw prices, in-play prices, event states and historical odds come from every region `regions()` lists. `raw()` takes
+one code, or several international codes in one call (`uk` is always asked alone). Every other method takes one code.
+
+```js
+const page = await client.raw({ region: "us", sports: "basketball" });
+const both = await client.raw({ region: ["us", "global"], sports: "basketball" }); // one board, priced as the two together
+const live = await client.raw({ region: "us", sports: "basketball", inPlay: "only" }); // prices on events in play
+```
+
+- The matched boards and the exchanges are served for `uk` only: elsewhere `odds()` throws an `OddsRelayError` with
+  status 403 and code `product_not_in_region`.
+- A call with no `region` reads `uk` when that is your account's home region. With another home region it throws
+  with status 400 and code `region_required`: pass `region`.
+
 ## Methods
 
-One method per live-feed data and lookup route. Filters go in a params object and are sent as query parameters.
+One method per data, lookup and historical route. Filters go in a params object and are sent as query parameters.
 
 | Method | Route | Key |
 |---|---|---|
@@ -78,6 +95,8 @@ One method per live-feed data and lookup route. Filters go in a params object an
 | `event(id, params?, options?)` | `/v2/odds/event/{id}`: every price for one event | yes |
 | `sports(params?)` | `/v2/sports`: the sport keys you can filter on, paged | yes |
 | `events({ sport, ...params })` | `/v2/events`: events for one sport, paged | yes |
+| `eventsState(params?)` | `/v2/events/state`: each event's state in one region (scheduled, started, gone or merged); no tokens | yes |
+| `eventsChanges({ since, ...params })` | `/v2/events/changes`: the state changes after `since`, in order; no tokens | yes |
 | `bookmakers(params?)` | `/v2/bookmakers`: the bookmaker and exchange catalogue | yes |
 | `regions()` | `/v2/regions`: which regions your key reaches | yes |
 | `coverage(params?)` | `/v2/coverage`: venues and sports per product; a key adds detail | no |
@@ -87,8 +106,11 @@ One method per live-feed data and lookup route. Filters go in a params object an
 | `pricing()` | `/v2/pricing`: the token rate card | yes |
 | `openapi()` | `/v2/openapi.json`: the API's OpenAPI document | no |
 | `healthz()` | `/healthz`: plain-text liveness check | no |
-
-The historical odds routes (`/v2/historical/*`) have no method yet.
+| `historyRaw({ date, sports, ...params }, options?)` | `/v2/historical/odds/raw`: the raw board as it stood at one moment | yes |
+| `historyEvent(id, { from, ...params }, options?)` | `/v2/historical/events/{id}/odds`: one event's price changes over a window of up to 24 hours | yes |
+| `closing({ date, sports, ...params }, options?)` | `/v2/historical/closing`: opening and closing prices of the events that started on one UTC day | yes |
+| `historyFiles(params?)` | `/v2/historical/files`: the bulk day files, with each one's size and cost | yes |
+| `downloadFile(tier, sport, file, params?, options?)` | `/v2/historical/files/{tier}/{sport}/{file}`: one bulk file, as a `Uint8Array` | yes |
 
 Parameters:
 
@@ -98,6 +120,42 @@ Parameters:
 - `format: "bare"` returns just the rows array, and the return type follows.
 
 Responses are the API's JSON, untouched. Fields added to the API after this version still arrive.
+
+## Historical odds
+
+```js
+import { writeFile } from "node:fs/promises";
+
+const board = await client.historyRaw({ date: "2026-11-17T18:00:00Z", sports: "basketball", region: "us" }, { maxTokens: budget });
+const moves = await client.historyEvent(eventId, { from: "2026-11-17T12:00:00Z", region: "us" }); // 24 hours, or pass `to`
+const lines = await client.closing({ date: "2026-11-17", sports: "basketball", region: "us" });
+
+const files = await client.historyFiles({ region: "uk" });
+const file = await client.downloadFile("closing", "soccer", "2026-11-17.csv.gz", {}, { maxTokens: budget });
+if (!file.notModified) await writeFile("2026-11-17.csv.gz", file.data); // a gzip CSV, saved as sent
+```
+
+Each region has its own archive with its own first day. A date before it throws with status 400 and code
+`date_out_of_range`, and `err.body.earliest` and `err.body.latest` give the range that region holds. Outside `uk`
+the archive holds bookmakers only. A file is charged in full when its download starts; `quote: true` or `maxTokens`
+prices it first.
+
+## Event states
+
+`eventsState()` is a snapshot of every event's state in one region, and `eventsChanges()` follows it. Neither spends
+tokens.
+
+```js
+const filters = { region: "us", sports: "basketball" };
+const snapshot = await client.eventsState(filters);
+let since = snapshot.data.meta.since; // from the first page
+
+const log = await client.eventsChanges({ since, ...filters }); // the same filters as the snapshot
+for (const change of log.data.data) rows.set(change.event.id, change.event);
+since = log.data.meta.next_since; // call again at once while log.data.meta.more is true
+```
+
+If `since` is too old the API answers 410 with code `since_expired`: take a new snapshot.
 
 ## Every reply
 

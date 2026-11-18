@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `eventsState()` and `eventsChanges()`: each event's state in one region, and the changes after a position.
+- Historical odds: `historyRaw()`, `historyEvent()`, `closing()`, `historyFiles()` and `downloadFile()`, which
+  resolves with the file's bytes. The priced ones take `quote: true` and the `maxTokens` option.
+- Regions: `raw()` takes one region code or several international codes in one call (`region: ["us", "global"]`),
+  and a list reply's `meta.regions` is typed. `inPlay` is typed on `raw()`, `event()` and `odds()`.
+- README: the regions, the `region_required`, `product_not_in_region` and `date_out_of_range` error codes, and
+  in-play prices.
+
 ## 0.1.1 (2026-10-11)
 
 README and package page only: the code is the same as 0.1.0.
